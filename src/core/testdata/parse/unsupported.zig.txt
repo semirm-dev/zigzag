@@ -1,0 +1,21 @@
+const Ctx = opaque {};
+
+const Options = struct { a: i32 };
+
+export fn zc_by_value(o: Options, inline_opts: struct { a: i32 }, c: Ctx) void {}
+
+export fn zc_infer_err() !void {}
+
+export fn zc_named_err() anyerror!i32 {
+    return 0;
+}
+
+export fn zc_slice(s: []const u8) void {}
+
+export fn zc_anyopaque(p: *anyopaque) void {}
+
+export fn zc_const_ptr(p: *const u32) void {}
+
+export fn zc_u128() u128 {
+    return 0;
+}

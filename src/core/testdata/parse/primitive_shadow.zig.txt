@@ -1,0 +1,9 @@
+const u32 = opaque {};
+
+export fn zc_take(x: u32) void {
+    _ = x;
+}
+
+export fn zc_new() ?*u32 {
+    return null;
+}

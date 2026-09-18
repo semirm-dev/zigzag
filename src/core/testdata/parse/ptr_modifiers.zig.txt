@@ -1,0 +1,34 @@
+const Ctx = opaque {};
+
+export fn zc_put(slot: *align(64) u32) void {
+    _ = slot;
+}
+
+export fn zc_poke(reg: *volatile u32) void {
+    _ = reg;
+}
+
+export fn zc_maybe(p: *allowzero u32) void {
+    _ = p;
+}
+
+export fn zc_far(p: *addrspace(.generic) u32) void {
+    _ = p;
+}
+
+export fn zc_opt_align(p: ?*align(16) u32) void {
+    _ = p;
+}
+
+export fn zc_many_align(p: [*]align(32) const u8, n: usize) void {
+    _ = p;
+    _ = n;
+}
+
+export fn zc_handle_align(c: *align(8) Ctx) void {
+    _ = c;
+}
+
+export fn zc_plain(p: *u32) void {
+    _ = p;
+}

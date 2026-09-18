@@ -1,0 +1,132 @@
+"""Locate and load the native @@LIB@@ library.
+
+Nothing here is specific to a single function: it finds the right binary for the
+running platform, loads it, and refuses to hand it out if it was built from a
+different exported surface than these bindings were generated from.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import platform
+import threading
+from pathlib import Path
+
+#: Base name of the shared library, as passed to zbridge.
+LIB_NAME = "@@LIB@@"
+
+#: ABI fingerprint these bindings were generated from. The native library
+#: exports the same value; a mismatch means the two were built from different
+#: sources, and every call after that point would be a guess.
+ABI_HASH = 0x@@ABI_HASH@@
+
+#: Point this at a library you built yourself instead of the packaged one.
+#: Library authors need it; end users should never have to set it.
+ENV_LIB_PATH = "@@ENV@@"
+
+#: (platform.system(), platform.machine().lower()) -> zbridge target id.
+_PLATFORMS: dict[tuple[str, str], str] = {
+@@PLATFORM_ROWS@@}
+
+#: zbridge target id -> file name installed under _native/<target id>/.
+_LIB_FILES: dict[str, str] = {
+@@LIBFILE_ROWS@@}
+
+_lib: ctypes.CDLL | None = None
+_lib_lock = threading.Lock()
+
+
+def target_id() -> str:
+    """Return the zbridge target id matching the running interpreter."""
+    system = platform.system()
+    machine = platform.machine().lower()
+    found = _PLATFORMS.get((system, machine))
+    if found is None:
+        supported = ", ".join(sorted({f"{s}/{m}" for s, m in _PLATFORMS}))
+        raise RuntimeError(
+            f"{LIB_NAME}: unsupported platform {system}/{machine}."
+            f" Binaries are published for: {supported}."
+            f" Set {ENV_LIB_PATH} to load a library you built yourself."
+        )
+    return found
+
+
+def library_path() -> Path:
+    """Return the path of the native library, honouring the env override."""
+    override = os.environ.get(ENV_LIB_PATH)
+    if override:
+        path = Path(override)
+        if not path.is_file():
+            raise RuntimeError(
+                f"{ENV_LIB_PATH} is set to {override!r}, which is not a file."
+            )
+        return path
+
+    tid = target_id()
+    path = Path(__file__).resolve().parent / "_native" / tid / _LIB_FILES[tid]
+    if not path.is_file():
+        raise RuntimeError(
+            f"{LIB_NAME}: no native library at {path}."
+            f" This install was built without the {tid} binary."
+            f" Install a wheel that includes it, or set {ENV_LIB_PATH} to a"
+            f" locally built library."
+        )
+    return path
+
+
+def _check_abi(lib: ctypes.CDLL, path: Path) -> None:
+    try:
+        fn = getattr(lib, "@@ABI_FN@@")
+    except AttributeError:
+        raise RuntimeError(
+            f"{LIB_NAME}: {path} does not export @@ABI_FN@@,"
+            f" so it was not built by zbridge from this library."
+        ) from None
+    fn.argtypes = []
+    fn.restype = ctypes.c_uint64
+    actual = int(fn())
+    if actual != ABI_HASH:
+        raise RuntimeError(
+            f"{LIB_NAME}: ABI mismatch loading {path}:"
+            f" these bindings were generated for {ABI_HASH:016x}"
+            f" but the library reports {actual:016x}."
+            f" Rebuild the library or regenerate the bindings."
+        )
+
+
+def load() -> ctypes.CDLL:
+    """Load the native library and verify its ABI. Prefer :func:`get_lib`."""
+    path = library_path()
+    # ctypes.CDLL is right on every target, Windows included: Zig's `export fn`
+    # uses the C calling convention, which is cdecl, and ctypes.WinDLL declares
+    # stdcall. On x86_64 Windows the two are the same convention so WinDLL
+    # would buy nothing, and on any 32-bit target it would actively mis-declare
+    # these functions. CDLL keeps the declaration honest either way.
+    try:
+        lib = ctypes.CDLL(str(path))
+    except OSError as exc:
+        raise RuntimeError(f"{LIB_NAME}: failed to load {path}: {exc}") from exc
+    _check_abi(lib, path)
+    return lib
+
+
+def get_lib() -> ctypes.CDLL:
+    """Return the loaded library, loading it on first use.
+
+    Loading is deferred so that importing the package never fails for a reason
+    unrelated to actually calling into the library.
+
+    Loaded once, under a lock: an unguarded check-then-set lets two threads
+    each run load(), and on a free-threaded build there is no GIL making the
+    check and the assignment look atomic. The fast path stays a single read of
+    a module global.
+    """
+    global _lib
+    lib = _lib
+    if lib is not None:
+        return lib
+    with _lib_lock:
+        if _lib is None:
+            _lib = load()
+        return _lib

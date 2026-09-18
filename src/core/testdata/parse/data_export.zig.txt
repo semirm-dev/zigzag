@@ -1,0 +1,9 @@
+const std = @import("std");
+
+export var zc_counter: u32 = 0;
+
+pub export const zc_limit: u32 = 16;
+
+export fn zc_get() u32 {
+    return zc_counter;
+}

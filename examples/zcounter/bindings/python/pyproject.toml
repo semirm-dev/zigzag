@@ -1,0 +1,24 @@
+# Written once by zbridge and never regenerated: this file is yours.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zcounter"
+version = "0.1.0"
+description = "Python bindings for the zcounter native library."
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.wheel]
+packages = ["zcounter"]
+
+[tool.hatch.build]
+# The native libraries under zcounter/_native/<target>/ are build outputs, so
+# they are usually gitignored; hatchling skips gitignored files unless
+# they are listed here.
+artifacts = [
+  "zcounter/py.typed",
+  "zcounter/_native/**/*.so",
+  "zcounter/_native/**/*.dylib",
+  "zcounter/_native/**/*.dll",
+]

@@ -1,0 +1,17 @@
+const S = struct {
+    pub export fn zc_hidden() u32 {
+        return 1;
+    }
+};
+
+fn impl() callconv(.c) u32 {
+    return 2;
+}
+
+comptime {
+    @export(&impl, .{ .name = "zc_also_hidden" });
+}
+
+export fn zc_visible() u32 {
+    return S.zc_hidden();
+}

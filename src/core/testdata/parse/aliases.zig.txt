@@ -1,0 +1,27 @@
+const Engine = opaque {};
+
+const Len = usize;
+const Bytes = [*]const u8;
+const Ctx = *Engine;
+const MaybeCtx = ?*Engine;
+const NotAType = 42;
+
+const AliasedLen = Len;
+const AliasedEngine = Engine;
+
+export fn zc_alias(n: Len, b: Bytes, c: Ctx, m: MaybeCtx, out: *Len) void {
+    _ = n;
+    _ = b;
+    _ = c;
+    _ = m;
+    _ = out;
+}
+
+export fn zc_chain(n: AliasedLen, e: *AliasedEngine) void {
+    _ = n;
+    _ = e;
+}
+
+export fn zc_bad_alias(x: NotAType) void {
+    _ = x;
+}

@@ -1,0 +1,26 @@
+const std = @import("std");
+
+/// An open encoder.
+pub const Ctx = opaque {};
+
+const Scratch = opaque {};
+
+/// Create one.
+pub export fn zc_new() ?*Ctx {
+    return null;
+}
+
+export fn zc_free(ctx: *Ctx) void {
+    _ = ctx;
+}
+
+fn helper(x: i32) i32 {
+    return x;
+}
+
+export fn zc_peek(
+    ctx: ?*const Ctx,
+) i32 {
+    _ = ctx;
+    return 0;
+}

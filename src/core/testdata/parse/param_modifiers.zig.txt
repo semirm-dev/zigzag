@@ -1,0 +1,16 @@
+export fn zc_ct(comptime n: u32) void {
+    _ = n;
+}
+
+export fn zc_na(noalias data: [*]const u8, len: usize) void {
+    _ = data;
+    _ = len;
+}
+
+export fn zc_any(x: anytype) void {
+    _ = x;
+}
+
+export fn zc_printf(fmt: [*:0]const u8, ...) callconv(.c) void {
+    _ = fmt;
+}

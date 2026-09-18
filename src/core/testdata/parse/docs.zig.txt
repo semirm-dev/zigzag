@@ -1,0 +1,12 @@
+/// One line.
+export fn zc_one() void {}
+
+/// Feed bytes to the encoder.
+///
+/// Returns the number consumed.
+export fn zc_many() usize {
+    return 0;
+}
+
+// A plain comment is not a doc comment.
+export fn zc_none() void {}

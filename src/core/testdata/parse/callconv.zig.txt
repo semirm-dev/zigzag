@@ -1,0 +1,9 @@
+export fn zc_boot() callconv(.naked) void {}
+
+export fn zc_c() callconv(.c) u32 {
+    return 0;
+}
+
+export fn zc_default() u32 {
+    return 0;
+}

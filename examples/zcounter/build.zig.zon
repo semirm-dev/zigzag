@@ -1,0 +1,18 @@
+.{
+    .name = .zcounter,
+    .version = "0.1.0",
+    .fingerprint = 0x4fc19378889b003,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // A path dependency, because the example lives inside the zbridge
+        // repo. A real project writes:
+        //   zig fetch --save git+https://github.com/.../zbridge#v0.1.0
+        .zbridge = .{ .path = "../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "bindings",
+    },
+}

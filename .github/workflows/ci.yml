@@ -1,0 +1,145 @@
+name: CI
+
+# Mirrors the verification gate in IMPLEMENTATION.md §11, across the 4-OS
+# matrix from Milestone 1. Every leg proves the same thing end to end: the
+# generator is deterministic, the cross-compiled binaries load, and a real
+# consumer in each language can call them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  verify:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-14
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig ${{ env.ZIG_VERSION }}
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          # Deliberately the floor the generated go.mod declares
+          # (gen.GoOptions.go_directive), so CI proves that floor is honest
+          # rather than only testing the latest toolchain.
+          go-version: "1.23"
+          cache: false
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Report toolchain
+        shell: bash
+        run: |
+          zig version
+          go version
+          # `python`, not `python3`: setup-python guarantees the former on
+          # every runner, while `python3` is missing from the Windows one.
+          python --version
+
+      # --- the gate, in the order IMPLEMENTATION.md §11 lists it -------------
+
+      - name: zig build test
+        run: zig build test
+
+      - name: zig build (the zbridge CLI)
+        run: zig build
+
+      - name: zbridge port (the end-to-end example)
+        working-directory: examples/zcounter
+        run: zig build port
+
+      # Regeneration must be byte-stable: the committed bindings/ tree is what
+      # `go get` and `pip install` consume, so a diff here means the generator
+      # is not deterministic (a timestamp, a map iteration order, an absolute
+      # path leaking into a header) and must be fixed, not committed around.
+      # Scoped to the generated *text*. Cross-host reproducibility of the
+      # compiled libraries is not something we have verified, so diffing them
+      # would turn a plausible toolchain difference into a baffling CI failure.
+      # The text is what review actually needs to see.
+      - name: Generated output is committed and stable
+        shell: bash
+        working-directory: examples/zcounter
+        run: |
+          pathspec=(bindings/ ':(exclude)bindings/go/native/**' ':(exclude)bindings/python/*/_native/**')
+          # Tracked files that changed.
+          if ! git diff --exit-code -- "${pathspec[@]}"; then
+            echo "::error::zig build port changed committed output. Commit the regenerated bindings/, or fix the nondeterminism it exposed."
+            exit 1
+          fi
+          # Files the generator produced that nobody ever committed. Without
+          # this, an entirely uncommitted bindings/ tree would pass silently.
+          untracked=$(git ls-files --others --exclude-standard -- "${pathspec[@]}")
+          if [ -n "$untracked" ]; then
+            echo "::error::zig build port produced files that are not committed:"
+            echo "$untracked"
+            exit 1
+          fi
+
+      # IMPLEMENTATION.md §7.6: the generated Go must be gofmt-clean and pass
+      # vet on its own. `go vet` here also proves the module is self-sufficient,
+      # which is exactly what a committed go.sum buys.
+      - name: Generated Go module is clean and self-sufficient
+        shell: bash
+        working-directory: examples/zcounter/bindings/go
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::the generator emitted unformatted Go:"
+            echo "$unformatted"
+            exit 1
+          fi
+          go vet ./...
+
+      - name: Go consumer tests
+        shell: bash
+        working-directory: examples/zcounter/go_test
+        run: |
+          # gofmt exits 0 even when it has complaints, so check its output.
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Python consumer tests
+        # pytest is deliberately not a dependency; the generated package needs
+        # nothing but the standard library.
+        shell: bash
+        working-directory: examples/zcounter/py_test
+        run: python -m unittest discover -v
+
+      - name: Python bindings compile
+        shell: bash
+        working-directory: examples/zcounter/bindings/python
+        run: python -m compileall -q zcounter

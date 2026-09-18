@@ -1,0 +1,6 @@
+const std = @import("std");
+const helper = @import("./helper.zig");
+const mylib = @import("mylib");
+const again = @import("std");
+
+export fn zc_noop() void {}

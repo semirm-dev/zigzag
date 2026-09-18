@@ -26,7 +26,9 @@ Allowlist additions to plan §4 (all trivially ABI-safe and needed by almost eve
 real C API):
 
 * `usize`/`isize` → Go `uintptr`/`int` (via cast), Python `c_size_t`/`c_ssize_t`.
-* `c_int`, `c_uint`, `c_long`, `c_ulong`, `c_char` → platform C types. Note `c_long` is 32-bit on Windows.
+* `c_int`, `c_uint`, `c_long`, `c_ulong` → platform C types. Note `c_long` is 32-bit on Windows.
+  `c_char` is **rejected**: C `char` is unsigned on aarch64 and signed on x86_64, both of
+  which zbridge builds for, so it would mean two different things in one set of bindings.
 * `[*:0]const u8` (C string in) → Go `string`, Python `str` (utf-8 encoded).
 * `*T` / `?*T` where `T` is an integer, float or bool → single out-param. Go returns it as an extra result; Python uses `byref`.
 * `enum(uN)` with explicit tag type → Go named int type plus consts; Python `IntEnum`. **Phase 7**, not v1.
@@ -344,3 +346,114 @@ with `zig build test -Dupdate-golden`. The diff shows up in review, never silent
 Phases 5 and 6 can run in parallel once the IR is frozen, and so can Phase 3 and
 Phase 2. Freeze `ir.zig` at the end of Phase 1 and treat changes to it as
 cross-team changes.
+
+---
+
+## 13. As built
+
+Written after the implementation landed, so the plan above doesn't read as if it
+were still the whole truth. Everything here was verified by running it.
+
+**Assumptions that held.** `export fn`s in a module reached only through
+`comptime { _ = @import("zbridge_input"); }` really are emitted into the shared
+library (`nm -D` on the example shows all seven exports plus the ABI hash
+function, with no libc dependency), so the `b.addOptions` fallback in §5.2 was
+never needed. D1 is fully implemented: `zbridge port` writes a throwaway project
+into `.zig-cache/zbridge/` and drives `zig build port` through the same
+`addPortStep` the build integration uses.
+
+**Where the output differs from §7 and §8.**
+
+* The Go loader is three files, not one. purego's `Dlopen` is build-tagged
+  unix-only (`dlfcn.go` covers darwin/freebsd/linux/netbsd), so Windows goes
+  through `syscall.LoadLibrary`; one file cannot compile for both. Hence
+  `loader_gen.go` + `loader_unix_gen.go` + `loader_windows_gen.go`.
+  `purego.RegisterLibFunc` also *panics* on a missing symbol, so the loader
+  recovers it into an error.
+* `c_long`/`c_ulong` get build-tagged type aliases in
+  `ctypes_{other,windows}_gen.go`, emitted only when those types appear. C
+  `long` is 32-bit on Windows and pointer-sized elsewhere, so no single Go type
+  is correct for both.
+* Generated Go doc comments are normalized before they are written: gofmt
+  rewrites `*` bullets into `-`, so a Zig `///` comment copied verbatim would
+  otherwise fail the `gofmt -l` gate through no fault of the library author.
+* The CLI gained `--out-zig` (the build step needs the glue root as a build
+  artifact), `--input-display` (the banner must not embed an absolute path, or
+  the determinism gate fails on every other machine), `--go-package`,
+  `--python-package`, `--no-go`, `--no-python`.
+* `PortOptions` gained `zbridge_dependency`, `python_package`, `go_package` and
+  `input_display`; `PortStep` exposes `generate`, `glue_dir` and `libraries`.
+
+**go.mod and go.sum.** purego's version and the `go` directive are paired in
+`gen.GoOptions` because purego v0.11.0 requires Go 1.25.0 and would not build
+against the `go 1.23` directive. The defaults are v0.9.0 and 1.23, chosen so the
+*published* bindings work for the widest range of consumers. zbridge cannot
+write `go.sum` (that means resolving and hashing modules over the network), so a
+library author runs `go mod tidy` once and commits it.
+
+**Test layout.** Tests live next to the code they cover, with fixtures under
+`src/**/testdata/`, rather than in the top-level `test/` tree sketched in §1.
+`@embedFile` cannot reach outside the module root, and keeping a generator's
+goldens beside it makes the pair obvious.
+
+**Known gaps.** `*const T` for a scalar is rejected rather than treated as a
+read-only in-pointer, because `ir.Type.out_ptr` has no `is_const` and silently
+turning an input into an extra return value would be worse than refusing.
+`ir.Type.unsupported` carries only the offending source text, so a diagnostic
+cannot say *why* a type is unsupported ("struct by value") without a reason tag
+on the IR. Neither is worth an IR change yet.
+
+---
+
+## 14. Review round (post-implementation)
+
+Two read-only reviews — one on the generated FFI code, one on the core
+pipeline — found bugs that the test suite did not. Recorded here because the
+pattern is worth keeping: everything below passed CI before it was found.
+
+**Memory safety, in the generated bindings.**
+
+* A handle with *several* destructor-shaped names had none of them folded into
+  `Close()`, and each was still emitted as an ordinary method — so calling one
+  freed the native object and left the wrapper holding a live dangling pointer.
+  Now every candidate consumes the handle.
+* Python wrapped a handle returned by a non-constructor in an *owning* object,
+  so garbage-collecting a borrowed pointer called the destructor on a library's
+  own singleton. Go already refused to do this; Python now matches.
+* The Go loader accepted a cached library on a **size** match, although the
+  hash in the path came from the embedded bytes and nothing ever hashed the
+  file on disk. Anyone able to write a same-size file into a shared cache
+  directory got it `dlopen`ed. It now verifies the contents.
+* Go had no closed-handle or nil guard where Python raised, so a call after
+  `Close()` passed 0 into a non-optional `*T`. Both now consult
+  `ir.HandleRef.optional`: non-optional panics/raises, optional forwards null.
+
+**The "never silently port what we don't understand" promise.**
+
+* `*align(64) u32`, `*volatile`, `*allowzero` and `addrspace` were parsed and
+  dropped; `callconv(.naked)` was ignored and called as C; `anytype` and
+  C-variadics produced diagnostics naming `'x'` or `'('`. All now rejected with
+  a message quoting what the user wrote.
+* `export fn` nested in a container, and `@export(...)`, were invisible — the
+  `.so` would carry symbols the bindings never mentioned. Now an error.
+* The C header generator emitted `/* unsupported: X */ void*` where Go and
+  Python both refused, with a test locking the behaviour in. Now it refuses too.
+* `c_char` was accepted and mapped, though C `char` is unsigned on aarch64 and
+  signed on x86_64 — both targets we ship. Rejected outright; the allowlist
+  never included it.
+
+**Everything else.** A user scaffold was overwritten without `--force` when it
+was merely unreadable (`catch null` conflating "absent" with "can't read it").
+`port --dry-run` wrote files. `--name` was uninterpolated into a Zig
+identifier, a package name and a path, so `--name ../../x` escaped the output
+root. The ABI hash changed when two functions were reordered or an opaque type
+renamed, invalidating good binaries. `pruneStale` was dead code whose glob
+would have matched a user's own `*_gen.go`; it was deleted rather than wired up.
+
+**What the reviews found clean**, having traced it rather than assumed it: Go
+pointer rules and `runtime.KeepAlive` placement (checked against purego's own
+implementation), the empty-slice `unsafe.SliceData` guard, finalizer-vs-call
+races, ctypes temporary lifetimes, the `restype` truncation trap, ABI
+enforcement in both languages, extraction atomicity, parser lifetimes,
+determinism of the generated bytes, and the parser/validator handshake over
+`ptr, len` pairs.

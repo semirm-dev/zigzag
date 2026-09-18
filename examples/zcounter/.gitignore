@@ -1,0 +1,17 @@
+# Zig build artifacts. The generated bindings/ tree is deliberately NOT ignored:
+# it is committed so `go get` works on the module (IMPLEMENTATION.md §5.2) and
+# so `git diff --exit-code bindings/` in the verification gate can prove the
+# output is stable.
+.zig-cache/
+zig-out/
+
+# Python bytecode, including what the generated package produces when imported
+# from py_test.
+__pycache__/
+*.py[cod]
+
+# Local scratch copies of a natively built library, used with the
+# ZCOUNTER_LIB_PATH override while developing.
+*.so.local
+*.dylib.local
+*.dll.local

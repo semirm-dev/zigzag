@@ -1,5 +1,7 @@
 # zbridge
 
+> Fully AI implemented, testing MVP. If it all works out, complete manual rewrite is about to happen.
+
 Turn a Zig `export fn` surface into a Go module and a Python package — with the
 native library already cross-compiled and embedded, so the people consuming it
 never install Zig, never see a C compiler, and never know FFI is happening.

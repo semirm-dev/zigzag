@@ -1,6 +1,7 @@
 # zbridge
 
-> Fully AI implemented, testing MVP. If it all works out, complete manual rewrite is about to happen.
+> Fully AI implemented, testing MVP.
+> Next step: Complete manual (careful) rewrite.
 
 Turn a Zig `export fn` surface into a Go module and a Python package — with the
 native library already cross-compiled and embedded, so the people consuming it
